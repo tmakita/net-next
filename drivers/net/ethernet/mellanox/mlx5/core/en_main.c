@@ -4674,7 +4674,7 @@ unlock:
 	return err;
 }
 
-static int mlx5e_xdp(struct net_device *dev, struct netdev_bpf *xdp)
+int mlx5e_xdp(struct net_device *dev, struct netdev_bpf *xdp)
 {
 	switch (xdp->command) {
 	case XDP_SETUP_PROG:
