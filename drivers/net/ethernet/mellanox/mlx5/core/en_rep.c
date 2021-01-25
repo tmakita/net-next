@@ -47,6 +47,7 @@
 #include "en/rep/neigh.h"
 #include "en/rep/bridge.h"
 #include "en/devlink.h"
+#include "en/xdp.h"
 #include "fs_core.h"
 #include "lib/mlx5.h"
 #define CREATE_TRACE_POINTS
@@ -364,7 +365,9 @@ int mlx5e_add_sqs_fwd_rules(struct mlx5e_priv *priv)
 	int err = -ENOMEM;
 	u32 *sqs;
 
-	sqs = kcalloc(priv->channels.num * priv->channels.params.num_tc, sizeof(*sqs), GFP_KERNEL);
+	/* +2 for xdp sqs: internal XDP_TX sq and ndo_xdp_xmit sq */
+	sqs = kcalloc(priv->channels.num * (priv->channels.params.num_tc + 2),
+		      sizeof(*sqs), GFP_KERNEL);
 	if (!sqs)
 		goto out;
 
@@ -372,6 +375,9 @@ int mlx5e_add_sqs_fwd_rules(struct mlx5e_priv *priv)
 		c = priv->channels.c[n];
 		for (tc = 0; tc < c->num_tc; tc++)
 			sqs[num_sqs++] = c->sq[tc].sqn;
+		if (c->xdp)
+			sqs[num_sqs++] = c->rq_xdpsq.sqn;
+		sqs[num_sqs++] = c->xdpsq.sqn;
 	}
 
 	err = mlx5e_sqs2vport_start(esw, rep, sqs, num_sqs);
@@ -536,6 +542,8 @@ static const struct net_device_ops mlx5e_netdev_ops_rep = {
 	.ndo_get_offload_stats	 = mlx5e_rep_get_offload_stats,
 	.ndo_change_mtu          = mlx5e_rep_change_mtu,
 	.ndo_change_carrier      = mlx5e_rep_change_carrier,
+	.ndo_bpf		 = mlx5e_xdp,
+	.ndo_xdp_xmit            = mlx5e_xdp_xmit,
 };
 
 bool mlx5e_eswitch_uplink_rep(const struct net_device *netdev)
