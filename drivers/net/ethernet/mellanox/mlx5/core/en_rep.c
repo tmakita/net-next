@@ -48,6 +48,7 @@
 #include "en/rep/bridge.h"
 #include "en/devlink.h"
 #include "en/xdp.h"
+#include "en/xsk/tx.h"
 #include "fs_core.h"
 #include "lib/mlx5.h"
 #define CREATE_TRACE_POINTS
@@ -365,8 +366,8 @@ int mlx5e_add_sqs_fwd_rules(struct mlx5e_priv *priv)
 	int err = -ENOMEM;
 	u32 *sqs;
 
-	/* +2 for xdp sqs: internal XDP_TX sq and ndo_xdp_xmit sq */
-	sqs = kcalloc(priv->channels.num * (priv->channels.params.num_tc + 2),
+	/* +3 for xdp sqs: internal XDP_TX sq, ndo_xdp_xmit sq, and xsk sq */
+	sqs = kcalloc(priv->channels.num * (priv->channels.params.num_tc + 3),
 		      sizeof(*sqs), GFP_KERNEL);
 	if (!sqs)
 		goto out;
@@ -378,6 +379,8 @@ int mlx5e_add_sqs_fwd_rules(struct mlx5e_priv *priv)
 		if (c->xdp)
 			sqs[num_sqs++] = c->rq_xdpsq.sqn;
 		sqs[num_sqs++] = c->xdpsq.sqn;
+		if (test_bit(MLX5E_CHANNEL_STATE_XSK, c->state))
+			sqs[num_sqs++] = c->xsksq.sqn;
 	}
 
 	err = mlx5e_sqs2vport_start(esw, rep, sqs, num_sqs);
@@ -544,6 +547,7 @@ static const struct net_device_ops mlx5e_netdev_ops_rep = {
 	.ndo_change_carrier      = mlx5e_rep_change_carrier,
 	.ndo_bpf		 = mlx5e_xdp,
 	.ndo_xdp_xmit            = mlx5e_xdp_xmit,
+	.ndo_xsk_wakeup          = mlx5e_xsk_wakeup,
 };
 
 bool mlx5e_eswitch_uplink_rep(const struct net_device *netdev)
@@ -557,7 +561,7 @@ bool mlx5e_eswitch_vf_rep(const struct net_device *netdev)
 	return netdev->netdev_ops == &mlx5e_netdev_ops_rep;
 }
 
-static void mlx5e_build_rep_params(struct net_device *netdev)
+static void mlx5e_build_rep_params(struct net_device *netdev, struct mlx5e_xsk *xsk)
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
 	struct mlx5e_rep_priv *rpriv = priv->ppriv;
@@ -596,6 +600,9 @@ static void mlx5e_build_rep_params(struct net_device *netdev)
 
 	/* RSS */
 	mlx5e_build_rss_params(&priv->rss_params, params->num_channels);
+
+	/* AF_XDP */
+	params->xsk = xsk;
 }
 
 static void mlx5e_build_rep_netdev(struct net_device *netdev,
@@ -629,7 +636,7 @@ static int mlx5e_init_rep(struct mlx5_core_dev *mdev,
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
 
-	mlx5e_build_rep_params(netdev);
+	mlx5e_build_rep_params(netdev, &priv->xsk);
 	mlx5e_timestamp_init(priv);
 
 	return 0;
@@ -795,9 +802,17 @@ static int mlx5e_init_rep_rx(struct mlx5e_priv *priv)
 	if (err)
 		goto err_destroy_indirect_tirs;
 
+	err = mlx5e_create_direct_rqts(priv, priv->xsk_tir, max_nch);
+	if (unlikely(err))
+		goto err_destroy_direct_tirs;
+
+	err = mlx5e_create_direct_tirs(priv, priv->xsk_tir, max_nch);
+	if (unlikely(err))
+		goto err_destroy_xsk_rqts;
+
 	err = mlx5e_create_rep_ttc_table(priv);
 	if (err)
-		goto err_destroy_direct_tirs;
+		goto err_destroy_xsk_tirs;
 
 	err = mlx5e_create_rep_root_ft(priv);
 	if (err)
@@ -815,6 +830,10 @@ err_destroy_root_ft:
 	mlx5e_destroy_rep_root_ft(priv);
 err_destroy_ttc_table:
 	mlx5e_destroy_ttc_table(priv, &priv->fs.ttc);
+err_destroy_xsk_tirs:
+	mlx5e_destroy_direct_tirs(priv, priv->xsk_tir, max_nch);
+err_destroy_xsk_rqts:
+	mlx5e_destroy_direct_rqts(priv, priv->xsk_tir, max_nch);
 err_destroy_direct_tirs:
 	mlx5e_destroy_direct_tirs(priv, priv->direct_tir, max_nch);
 err_destroy_indirect_tirs:
@@ -836,6 +855,8 @@ static void mlx5e_cleanup_rep_rx(struct mlx5e_priv *priv)
 	rep_vport_rx_rule_destroy(priv);
 	mlx5e_destroy_rep_root_ft(priv);
 	mlx5e_destroy_ttc_table(priv, &priv->fs.ttc);
+	mlx5e_destroy_direct_tirs(priv, priv->xsk_tir, max_nch);
+	mlx5e_destroy_direct_rqts(priv, priv->xsk_tir, max_nch);
 	mlx5e_destroy_direct_tirs(priv, priv->direct_tir, max_nch);
 	mlx5e_destroy_indirect_tirs(priv);
 	mlx5e_destroy_direct_rqts(priv, priv->direct_tir, max_nch);
@@ -1077,7 +1098,7 @@ static const struct mlx5e_profile mlx5e_rep_profile = {
 	.update_stats           = mlx5e_stats_update_ndo_stats,
 	.rx_handlers            = &mlx5e_rx_handlers_rep,
 	.max_tc			= 1,
-	.rq_groups		= MLX5E_NUM_RQ_GROUPS(REGULAR),
+	.rq_groups		= MLX5E_NUM_RQ_GROUPS(XSK),
 	.stats_grps		= mlx5e_rep_stats_grps,
 	.stats_grps_num		= mlx5e_rep_stats_grps_num,
 	.rx_ptp_support		= false,
