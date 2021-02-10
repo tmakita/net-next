@@ -133,6 +133,7 @@ struct mlx5_flow_steering {
 	struct mlx5_flow_root_namespace	*rdma_rx_root_ns;
 	struct mlx5_flow_root_namespace	*rdma_tx_root_ns;
 	struct mlx5_flow_root_namespace	*egress_root_ns;
+	struct mlx5_flow_root_namespace **rep_rx_root_ns;
 	int esw_egress_acl_vports;
 	int esw_ingress_acl_vports;
 };
@@ -290,6 +291,10 @@ int mlx5_flow_namespace_set_peer(struct mlx5_flow_root_namespace *ns,
 
 int mlx5_flow_namespace_set_mode(struct mlx5_flow_namespace *ns,
 				 enum mlx5_flow_steering_mode mode);
+
+struct mlx5_flow_namespace *mlx5_get_flow_rep_rx_namespace(struct mlx5_core_dev *dev,
+							   enum mlx5_flow_namespace_type type,
+							   int vport);
 
 int mlx5_init_fs(struct mlx5_core_dev *dev);
 void mlx5_cleanup_fs(struct mlx5_core_dev *dev);
