@@ -685,6 +685,16 @@ bool mlx5e_eswitch_vf_rep(struct net_device *netdev)
 	return netdev->netdev_ops == &mlx5e_netdev_ops_rep;
 }
 
+static struct mlx5_flow_namespace *
+mlx5e_get_flow_rep_rx_namespace(struct mlx5e_priv *priv,
+				enum mlx5_flow_namespace_type type)
+{
+	struct mlx5e_rep_priv *rpriv = priv->ppriv;
+	struct mlx5_eswitch_rep *rep = rpriv->rep;
+
+	return mlx5_get_flow_rep_rx_namespace(priv->mdev, type, rep->vport);
+}
+
 static void mlx5e_build_rep_params(struct net_device *netdev, struct mlx5e_xsk *xsk)
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
@@ -795,21 +805,15 @@ static void mlx5e_cleanup_rep(struct mlx5e_priv *priv)
 
 static int mlx5e_create_rep_ttc_table(struct mlx5e_priv *priv)
 {
-	struct mlx5e_rep_priv *rpriv = priv->ppriv;
-	struct mlx5_eswitch_rep *rep = rpriv->rep;
 	struct ttc_params ttc_params = {};
 	int tt, err;
 
-	priv->fs.ns = mlx5_get_flow_namespace(priv->mdev,
-					      MLX5_FLOW_NAMESPACE_KERNEL);
+	priv->fs.ns = mlx5e_get_flow_rep_rx_namespace(priv,
+						      MLX5_FLOW_NAMESPACE_KERNEL);
 
 	/* The inner_ttc in the ttc params is intentionally not set */
 	ttc_params.any_tt_tirn = priv->direct_tir[0].tirn;
 	mlx5e_set_ttc_ft_params(&ttc_params);
-
-	if (rep->vport != MLX5_VPORT_UPLINK)
-		/* To give uplik rep TTC a lower level for chaining from root ft */
-		ttc_params.ft_attr.level = MLX5E_TTC_FT_LEVEL + 1;
 
 	for (tt = 0; tt < MLX5E_NUM_INDIR_TIRS; tt++)
 		ttc_params.indir_tirn[tt] = priv->indir_tir[tt].tirn;
@@ -825,21 +829,13 @@ static int mlx5e_create_rep_ttc_table(struct mlx5e_priv *priv)
 static int mlx5e_create_rep_root_ft(struct mlx5e_priv *priv)
 {
 	struct mlx5e_rep_priv *rpriv = priv->ppriv;
-	struct mlx5_eswitch_rep *rep = rpriv->rep;
 	struct mlx5_flow_table_attr ft_attr = {};
 	struct mlx5_flow_namespace *ns;
 	int err = 0;
 
-	if (rep->vport != MLX5_VPORT_UPLINK) {
-		/* non uplik reps will skip any bypass tables and go directly to
-		 * their own ttc
-		 */
-		rpriv->root_ft = priv->fs.ttc.ft.t;
-		return 0;
-	}
-
-	/* uplink root ft will be used to auto chain, to ethtool or ttc tables */
-	ns = mlx5_get_flow_namespace(priv->mdev, MLX5_FLOW_NAMESPACE_OFFLOADS);
+	/* root ft will be used to auto chain, to ethtool or ttc tables */
+	ns = mlx5e_get_flow_rep_rx_namespace(priv,
+					     MLX5_FLOW_NAMESPACE_OFFLOADS);
 	if (!ns) {
 		netdev_err(priv->netdev, "Failed to get reps offloads namespace\n");
 		return -EOPNOTSUPP;
@@ -861,10 +857,7 @@ static int mlx5e_create_rep_root_ft(struct mlx5e_priv *priv)
 static void mlx5e_destroy_rep_root_ft(struct mlx5e_priv *priv)
 {
 	struct mlx5e_rep_priv *rpriv = priv->ppriv;
-	struct mlx5_eswitch_rep *rep = rpriv->rep;
 
-	if (rep->vport != MLX5_VPORT_UPLINK)
-		return;
 	mlx5_destroy_flow_table(rpriv->root_ft);
 }
 
