@@ -2616,8 +2616,20 @@ static void esw_destroy_uplink_offloads_acl_tables(struct mlx5_eswitch *esw)
 
 static int esw_offloads_steering_init(struct mlx5_eswitch *esw)
 {
+	struct mlx5_core_dev *dev = esw->dev;
 	struct mlx5_esw_indir_table *indir;
+	struct mlx5_vport *vport_ul;
+	int total_vports;
 	int err;
+
+	total_vports = mlx5_eswitch_get_total_vports(dev);
+	vport_ul = mlx5_eswitch_get_vport(esw, MLX5_VPORT_UPLINK);
+	if (IS_ERR(vport_ul))
+		return PTR_ERR(vport_ul);
+
+	err = mlx5_fs_rep_rx_init(dev, total_vports, vport_ul->index);
+	if (err)
+		return err;
 
 	memset(&esw->fdb_table.offloads, 0, sizeof(struct offloads_fdb));
 	mutex_init(&esw->fdb_table.offloads.vports.lock);
@@ -2665,6 +2677,7 @@ create_acl_err:
 	mlx5_esw_indir_table_destroy(esw->fdb_table.offloads.indir);
 create_indir_err:
 	mutex_destroy(&esw->fdb_table.offloads.vports.lock);
+	mlx5_fs_rep_rx_cleanup(dev);
 	return err;
 }
 
@@ -2677,6 +2690,7 @@ static void esw_offloads_steering_cleanup(struct mlx5_eswitch *esw)
 	esw_destroy_uplink_offloads_acl_tables(esw);
 	mlx5_esw_indir_table_destroy(esw->fdb_table.offloads.indir);
 	mutex_destroy(&esw->fdb_table.offloads.vports.lock);
+	mlx5_fs_rep_rx_cleanup(esw->dev);
 }
 
 static void
