@@ -1771,6 +1771,7 @@ static void mlx5e_destroy_vlan_table(struct mlx5e_priv *priv)
 
 int mlx5e_create_flow_steering(struct mlx5e_priv *priv)
 {
+	struct mlx5_flow_namespace *ethtool_ns;
 	struct ttc_params ttc_params = {};
 	int tt, err;
 
@@ -1828,7 +1829,9 @@ int mlx5e_create_flow_steering(struct mlx5e_priv *priv)
 	if (err)
 		goto err_destory_vlan_table;
 
-	mlx5e_ethtool_init_steering(priv);
+	ethtool_ns = mlx5_get_flow_namespace(priv->mdev,
+					     MLX5_FLOW_NAMESPACE_ETHTOOL);
+	mlx5e_ethtool_init_steering(priv, ethtool_ns);
 
 	return 0;
 
