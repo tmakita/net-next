@@ -60,7 +60,6 @@ static struct mlx5e_ethtool_table *get_flow_table(struct mlx5e_priv *priv,
 {
 	struct mlx5_flow_table_attr ft_attr = {};
 	struct mlx5e_ethtool_table *eth_ft;
-	struct mlx5_flow_namespace *ns;
 	struct mlx5_flow_table *ft;
 	int max_tuples;
 	int table_size;
@@ -95,9 +94,7 @@ static struct mlx5e_ethtool_table *get_flow_table(struct mlx5e_priv *priv,
 	if (eth_ft->ft)
 		return eth_ft;
 
-	ns = mlx5_get_flow_namespace(priv->mdev,
-				     MLX5_FLOW_NAMESPACE_ETHTOOL);
-	if (!ns)
+	if (!priv->fs.ethtool_ns)
 		return ERR_PTR(-EOPNOTSUPP);
 
 	table_size = min_t(u32, BIT(MLX5_CAP_FLOWTABLE(priv->mdev,
@@ -107,7 +104,7 @@ static struct mlx5e_ethtool_table *get_flow_table(struct mlx5e_priv *priv,
 	ft_attr.prio = prio;
 	ft_attr.max_fte = table_size;
 	ft_attr.autogroup.max_num_groups = MLX5E_ETHTOOL_NUM_GROUPS;
-	ft = mlx5_create_auto_grouped_flow_table(ns, &ft_attr);
+	ft = mlx5_create_auto_grouped_flow_table(priv->fs.ethtool_ns, &ft_attr);
 	if (IS_ERR(ft))
 		return (void *)ft;
 
@@ -780,9 +777,10 @@ void mlx5e_ethtool_cleanup_steering(struct mlx5e_priv *priv)
 		del_ethtool_rule(priv, iter);
 }
 
-void mlx5e_ethtool_init_steering(struct mlx5e_priv *priv)
+void mlx5e_ethtool_init_steering(struct mlx5e_priv *priv, struct mlx5_flow_namespace *ns)
 {
 	INIT_LIST_HEAD(&priv->fs.ethtool.rules);
+	priv->fs.ethtool_ns = ns;
 }
 
 static enum mlx5e_traffic_types flow_type_to_traffic_type(u32 flow_type)

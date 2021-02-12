@@ -900,6 +900,7 @@ int mlx5e_rep_bond_update(struct mlx5e_priv *priv, bool cleanup)
 static int mlx5e_init_rep_rx(struct mlx5e_priv *priv)
 {
 	struct mlx5_core_dev *mdev = priv->mdev;
+	struct mlx5_flow_namespace *ethtool_ns;
 	int err;
 
 	mlx5e_init_l2_addr(priv);
@@ -946,7 +947,9 @@ static int mlx5e_init_rep_rx(struct mlx5e_priv *priv)
 	if (err)
 		goto err_destroy_root_ft;
 
-	mlx5e_ethtool_init_steering(priv);
+	ethtool_ns = mlx5e_get_flow_rep_rx_namespace(priv,
+						     MLX5_FLOW_NAMESPACE_ETHTOOL);
+	mlx5e_ethtool_init_steering(priv, ethtool_ns);
 
 	return 0;
 
