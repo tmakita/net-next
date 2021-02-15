@@ -114,6 +114,10 @@ enum mlx5_flow_steering_mode {
 	MLX5_FLOW_STEERING_MODE_SMFS
 };
 
+enum mlx5_flow_root_namespace_flag {
+	MLX5_FLOW_ROOT_NAMESPACE_SUBTREE = BIT(0),
+};
+
 struct mlx5_flow_steering {
 	struct mlx5_core_dev *dev;
 	enum   mlx5_flow_steering_mode	mode;
@@ -266,6 +270,7 @@ struct mlx5_flow_root_namespace {
 	struct mutex			chain_lock;
 	struct list_head		underlay_qpns;
 	const struct mlx5_flow_cmds	*cmds;
+	u32				flags;
 };
 
 int mlx5_init_fc_stats(struct mlx5_core_dev *dev);

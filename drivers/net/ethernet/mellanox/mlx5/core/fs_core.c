@@ -909,6 +909,9 @@ static int update_root_ft_create(struct mlx5_flow_table *ft, struct fs_prio
 	int err = 0;
 	u32 qpn;
 
+	if (root->flags & MLX5_FLOW_ROOT_NAMESPACE_SUBTREE)
+		return 0;
+
 	if (root->root_ft)
 		min_level = root->root_ft->level;
 
