@@ -344,6 +344,8 @@ static const struct ethtool_ops mlx5e_rep_ethtool_ops = {
 	.set_coalesce      = mlx5e_rep_set_coalesce,
 	.get_rxfh_key_size   = mlx5e_rep_get_rxfh_key_size,
 	.get_rxfh_indir_size = mlx5e_rep_get_rxfh_indir_size,
+	.get_rxnfc         = mlx5e_get_rxnfc,
+	.set_rxnfc         = mlx5e_set_rxnfc,
 };
 
 static const struct ethtool_ops mlx5e_uplink_rep_ethtool_ops = {
