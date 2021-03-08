@@ -691,10 +691,13 @@ static struct mlx5_flow_namespace *
 mlx5e_get_flow_rep_rx_namespace(struct mlx5e_priv *priv,
 				enum mlx5_flow_namespace_type type)
 {
+	struct mlx5_eswitch *esw = priv->mdev->priv.eswitch;
 	struct mlx5e_rep_priv *rpriv = priv->ppriv;
 	struct mlx5_eswitch_rep *rep = rpriv->rep;
+	int vport_index;
 
-	return mlx5_get_flow_rep_rx_namespace(priv->mdev, type, rep->vport);
+	vport_index = mlx5_eswitch_vport_num_to_index(esw, rep->vport);
+	return mlx5_get_flow_rep_rx_namespace(priv->mdev, type, vport_index);
 }
 
 static void mlx5e_build_rep_params(struct net_device *netdev, struct mlx5e_xsk *xsk)

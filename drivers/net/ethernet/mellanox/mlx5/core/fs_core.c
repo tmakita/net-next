@@ -38,6 +38,7 @@
 #include "mlx5_core.h"
 #include "fs_core.h"
 #include "fs_cmd.h"
+#include "eswitch.h"
 #include "diag/fs_tracepoint.h"
 #include "accel/ipsec.h"
 #include "fpga/ipsec.h"
@@ -2267,7 +2268,7 @@ mlx5_get_flow_rep_rx_namespace(struct mlx5_core_dev *dev,
 	if (!steering)
 		return NULL;
 
-	if (vport == MLX5_VPORT_UPLINK) {
+	if (vport == mlx5_eswitch_uplink_idx(dev->priv.eswitch)) {
 		root_ns = steering->root_ns;
 	} else {
 		if (vport >= mlx5_eswitch_get_total_vports(dev))
@@ -2548,15 +2549,21 @@ static void set_prio_attrs(struct mlx5_flow_root_namespace *root_ns)
 #define ANCHOR_PRIO 0
 #define ANCHOR_SIZE 1
 #define ANCHOR_LEVEL 0
-static int create_anchor_flow_table(struct mlx5_flow_steering *steering, int vport)
+static int create_anchor_flow_table(struct mlx5_flow_steering *steering,
+				    bool rep, int vport)
 {
 	struct mlx5_flow_namespace *ns = NULL;
 	struct mlx5_flow_table_attr ft_attr = {};
 	struct mlx5_flow_table *ft;
 
-	ns = mlx5_get_flow_rep_rx_namespace(steering->dev,
-					    MLX5_FLOW_NAMESPACE_ANCHOR,
-					    vport);
+	if (rep) {
+		ns = mlx5_get_flow_rep_rx_namespace(steering->dev,
+						    MLX5_FLOW_NAMESPACE_ANCHOR,
+						    vport);
+	} else {
+		ns = mlx5_get_flow_namespace(steering->dev, MLX5_FLOW_NAMESPACE_ANCHOR);
+	}
+
 	if (WARN_ON(!ns))
 		return -EINVAL;
 
@@ -2587,7 +2594,7 @@ static int init_root_ns(struct mlx5_flow_steering *steering)
 		goto out_err;
 
 	set_prio_attrs(steering->root_ns);
-	err = create_anchor_flow_table(steering, MLX5_VPORT_UPLINK);
+	err = create_anchor_flow_table(steering, false, 0);
 	if (err)
 		goto out_err;
 
@@ -2907,7 +2914,7 @@ static int init_rep_rx_root_ns(struct mlx5_flow_steering *steering, int vport)
 		goto out_err;
 
 	set_prio_attrs(steering->rep_rx_root_ns[vport]);
-	err = create_anchor_flow_table(steering, vport);
+	err = create_anchor_flow_table(steering, true, vport);
 	if (err)
 		goto out_err;
 
@@ -2933,6 +2940,8 @@ static int init_rep_rxs_root_ns(struct mlx5_core_dev *dev)
 		return -ENOMEM;
 
 	for (i = 0; i < total_vports; i++) {
+		if (i == mlx5_eswitch_uplink_idx(dev->priv.eswitch))
+			continue;
 		err = init_rep_rx_root_ns(steering, i);
 		if (err)
 			goto cleanup_root_ns;
@@ -3095,9 +3104,11 @@ int mlx5_init_fs(struct mlx5_core_dev *dev)
 			err = init_fdb_root_ns(steering);
 			if (err)
 				goto err;
-			err = init_rep_rxs_root_ns(dev);
-			if (err)
-				goto err;
+			if (steering->root_ns) {
+				err = init_rep_rxs_root_ns(dev);
+				if (err)
+					goto err;
+			}
 		}
 		if (MLX5_CAP_ESW_EGRESS_ACL(dev, ft_support)) {
 			err = init_egress_acls_root_ns(dev);
