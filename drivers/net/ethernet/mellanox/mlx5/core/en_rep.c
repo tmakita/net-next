@@ -366,6 +366,7 @@ int mlx5e_add_sqs_fwd_rules(struct mlx5e_priv *priv)
 	int err = -ENOMEM;
 	u32 *sqs;
 
+	/* +3 for xdp sqs: internal XDP_TX sq, ndo_xdp_xmit sq, and xsk sq */
 	sqs = kcalloc(priv->channels.num * (priv->channels.params.num_tc + 3),
 		      sizeof(*sqs), GFP_KERNEL);
 	if (!sqs)
