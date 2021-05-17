@@ -569,12 +569,14 @@ mlx5e_get_flow_rep_rx_namespace(struct mlx5e_priv *priv,
 	struct mlx5e_rep_priv *rpriv = priv->ppriv;
 	struct mlx5_eswitch_rep *rep = rpriv->rep;
 	struct mlx5_vport *vport;
+	bool uplink;
 
 	vport = mlx5_eswitch_get_vport(esw, rep->vport);
 	if (IS_ERR(vport))
 		return NULL;
 
-	return mlx5_get_flow_rep_rx_namespace(priv->mdev, type, vport->index);
+	uplink = rep->vport == MLX5_VPORT_UPLINK;
+	return mlx5_get_flow_rep_rx_namespace(priv->mdev, type, uplink, vport->index);
 }
 
 static void mlx5e_build_rep_params(struct net_device *netdev, struct mlx5e_xsk *xsk)
