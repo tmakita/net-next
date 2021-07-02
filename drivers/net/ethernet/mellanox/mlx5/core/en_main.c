@@ -3225,51 +3225,42 @@ static void mlx5e_build_indir_tir_ctx_common(struct mlx5e_priv *priv,
 	mlx5e_build_tir_ctx_lro(&priv->channels.params, tirc);
 }
 
-static void mlx5e_build_indir_tir_ctx(struct mlx5e_priv *priv,
-				      enum mlx5e_traffic_types tt,
-				      u32 *tirc)
+static void mlx5e_build_indir_tir_ctx(struct mlx5e_priv *priv, u32 *tirc,
+				      struct mlx5e_create_tir_param param)
 {
 	mlx5e_build_indir_tir_ctx_common(priv, priv->indir_rqt.rqtn, tirc);
 	mlx5e_build_indir_tir_ctx_hash(&priv->rss_params,
-				       &tirc_default_config[tt], tirc, false);
+				       &tirc_default_config[param.tt], tirc, false);
 }
 
-static void mlx5e_build_direct_tir_ctx(struct mlx5e_priv *priv, u32 rqtn, u32 *tirc)
+static void mlx5e_build_direct_tir_ctx(struct mlx5e_priv *priv, u32 *tirc,
+				       struct mlx5e_create_tir_param param)
 {
-	mlx5e_build_indir_tir_ctx_common(priv, rqtn, tirc);
+	mlx5e_build_indir_tir_ctx_common(priv, param.rqtn, tirc);
 	MLX5_SET(tirc, tirc, rx_hash_fn, MLX5_RX_HASH_FN_INVERTED_XOR8);
 }
 
-static void mlx5e_build_inner_indir_tir_ctx(struct mlx5e_priv *priv,
-					    enum mlx5e_traffic_types tt,
-					    u32 *tirc)
+static void mlx5e_build_inner_indir_tir_ctx(struct mlx5e_priv *priv, u32 *tirc,
+					    struct mlx5e_create_tir_param param)
 {
 	mlx5e_build_indir_tir_ctx_common(priv, priv->indir_rqt.rqtn, tirc);
 	mlx5e_build_indir_tir_ctx_hash(&priv->rss_params,
-				       &tirc_default_config[tt], tirc, true);
+				       &tirc_default_config[param.tt], tirc, true);
 }
 
 int mlx5e_create_indirect_tirs(struct mlx5e_priv *priv, bool inner_ttc)
 {
+	struct mlx5e_create_tir_param param;
 	struct mlx5e_tir *tir;
-	void *tirc;
-	int inlen;
 	int i = 0;
 	int err;
-	u32 *in;
 	int tt;
 
-	inlen = MLX5_ST_SZ_BYTES(create_tir_in);
-	in = kvzalloc(inlen, GFP_KERNEL);
-	if (!in)
-		return -ENOMEM;
-
 	for (tt = 0; tt < MLX5E_NUM_INDIR_TIRS; tt++) {
-		memset(in, 0, inlen);
 		tir = &priv->indir_tir[tt];
-		tirc = MLX5_ADDR_OF(create_tir_in, in, ctx);
-		mlx5e_build_indir_tir_ctx(priv, tt, tirc);
-		err = mlx5e_create_tir(priv->mdev, tir, in);
+		param.tt = tt;
+		err = mlx5e_create_tir(priv, tir, param,
+				       mlx5e_build_indir_tir_ctx);
 		if (err) {
 			mlx5_core_warn(priv->mdev, "create indirect tirs failed, %d\n", err);
 			goto err_destroy_inner_tirs;
@@ -3277,70 +3268,53 @@ int mlx5e_create_indirect_tirs(struct mlx5e_priv *priv, bool inner_ttc)
 	}
 
 	if (!inner_ttc || !mlx5e_tunnel_inner_ft_supported(priv->mdev))
-		goto out;
+		return 0;
 
 	for (i = 0; i < MLX5E_NUM_INDIR_TIRS; i++) {
-		memset(in, 0, inlen);
 		tir = &priv->inner_indir_tir[i];
-		tirc = MLX5_ADDR_OF(create_tir_in, in, ctx);
-		mlx5e_build_inner_indir_tir_ctx(priv, i, tirc);
-		err = mlx5e_create_tir(priv->mdev, tir, in);
+		param.tt = i;
+		err = mlx5e_create_tir(priv, tir, param,
+				       mlx5e_build_inner_indir_tir_ctx);
 		if (err) {
 			mlx5_core_warn(priv->mdev, "create inner indirect tirs failed, %d\n", err);
 			goto err_destroy_inner_tirs;
 		}
 	}
 
-out:
-	kvfree(in);
-
 	return 0;
 
 err_destroy_inner_tirs:
 	for (i--; i >= 0; i--)
-		mlx5e_destroy_tir(priv->mdev, &priv->inner_indir_tir[i]);
+		mlx5e_destroy_tir(priv, &priv->inner_indir_tir[i]);
 
 	for (tt--; tt >= 0; tt--)
-		mlx5e_destroy_tir(priv->mdev, &priv->indir_tir[tt]);
-
-	kvfree(in);
+		mlx5e_destroy_tir(priv, &priv->indir_tir[tt]);
 
 	return err;
 }
 
 int mlx5e_create_direct_tirs(struct mlx5e_priv *priv, struct mlx5e_tir *tirs, int n)
 {
+	struct mlx5e_create_tir_param param;
 	struct mlx5e_tir *tir;
-	void *tirc;
-	int inlen;
-	int err = 0;
-	u32 *in;
+	int err;
 	int ix;
 
-	inlen = MLX5_ST_SZ_BYTES(create_tir_in);
-	in = kvzalloc(inlen, GFP_KERNEL);
-	if (!in)
-		return -ENOMEM;
-
 	for (ix = 0; ix < n; ix++) {
-		memset(in, 0, inlen);
 		tir = &tirs[ix];
-		tirc = MLX5_ADDR_OF(create_tir_in, in, ctx);
-		mlx5e_build_direct_tir_ctx(priv, tir->rqt.rqtn, tirc);
-		err = mlx5e_create_tir(priv->mdev, tir, in);
+		param.rqtn = tir->rqt.rqtn;
+		err = mlx5e_create_tir(priv, tir, param,
+				       mlx5e_build_direct_tir_ctx);
 		if (unlikely(err))
 			goto err_destroy_ch_tirs;
 	}
 
-	goto out;
+	return 0;
 
 err_destroy_ch_tirs:
 	mlx5_core_warn(priv->mdev, "create tirs failed, %d\n", err);
 	for (ix--; ix >= 0; ix--)
-		mlx5e_destroy_tir(priv->mdev, &tirs[ix]);
-
-out:
-	kvfree(in);
+		mlx5e_destroy_tir(priv, &tirs[ix]);
 
 	return err;
 }
@@ -3350,14 +3324,14 @@ void mlx5e_destroy_indirect_tirs(struct mlx5e_priv *priv)
 	int i;
 
 	for (i = 0; i < MLX5E_NUM_INDIR_TIRS; i++)
-		mlx5e_destroy_tir(priv->mdev, &priv->indir_tir[i]);
+		mlx5e_destroy_tir(priv, &priv->indir_tir[i]);
 
 	/* Verify inner tirs resources allocated */
 	if (!priv->inner_indir_tir[0].tirn)
 		return;
 
 	for (i = 0; i < MLX5E_NUM_INDIR_TIRS; i++)
-		mlx5e_destroy_tir(priv->mdev, &priv->inner_indir_tir[i]);
+		mlx5e_destroy_tir(priv, &priv->inner_indir_tir[i]);
 }
 
 void mlx5e_destroy_direct_tirs(struct mlx5e_priv *priv, struct mlx5e_tir *tirs, int n)
@@ -3365,7 +3339,7 @@ void mlx5e_destroy_direct_tirs(struct mlx5e_priv *priv, struct mlx5e_tir *tirs, 
 	int i;
 
 	for (i = 0; i < n; i++)
-		mlx5e_destroy_tir(priv->mdev, &tirs[i]);
+		mlx5e_destroy_tir(priv, &tirs[i]);
 }
 
 static int mlx5e_modify_channels_scatter_fcs(struct mlx5e_channels *chs, bool enable)

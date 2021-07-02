@@ -89,33 +89,26 @@ static void mlx5e_close_trap_rq(struct mlx5e_rq *rq)
 	mlx5e_close_cq(&rq->cq);
 }
 
-static int mlx5e_create_trap_direct_rq_tir(struct mlx5_core_dev *mdev, struct mlx5e_tir *tir,
-					   u32 rqn)
+static void mlx5e_build_trap_direct_tir_ctx(struct mlx5e_priv *priv, u32 *tirc,
+					    struct mlx5e_create_tir_param param)
 {
-	void *tirc;
-	int inlen;
-	u32 *in;
-	int err;
-
-	inlen = MLX5_ST_SZ_BYTES(create_tir_in);
-	in = kvzalloc(inlen, GFP_KERNEL);
-	if (!in)
-		return -ENOMEM;
-
-	tirc = MLX5_ADDR_OF(create_tir_in, in, ctx);
-	MLX5_SET(tirc, tirc, transport_domain, mdev->mlx5e_res.hw_objs.td.tdn);
+	MLX5_SET(tirc, tirc, transport_domain, priv->mdev->mlx5e_res.hw_objs.td.tdn);
 	MLX5_SET(tirc, tirc, rx_hash_fn, MLX5_RX_HASH_FN_NONE);
 	MLX5_SET(tirc, tirc, disp_type, MLX5_TIRC_DISP_TYPE_DIRECT);
-	MLX5_SET(tirc, tirc, inline_rqn, rqn);
-	err = mlx5e_create_tir(mdev, tir, in);
-	kvfree(in);
-
-	return err;
+	MLX5_SET(tirc, tirc, inline_rqn, param.rqn);
 }
 
-static void mlx5e_destroy_trap_direct_rq_tir(struct mlx5_core_dev *mdev, struct mlx5e_tir *tir)
+static int mlx5e_create_trap_direct_rq_tir(struct mlx5e_priv *priv,
+					   struct mlx5e_tir *tir, u32 rqn)
 {
-	mlx5e_destroy_tir(mdev, tir);
+	struct mlx5e_create_tir_param param = { .rqn = rqn };
+
+	return mlx5e_create_tir(priv, tir, param, mlx5e_build_trap_direct_tir_ctx);
+}
+
+static void mlx5e_destroy_trap_direct_rq_tir(struct mlx5e_priv *priv, struct mlx5e_tir *tir)
+{
+	mlx5e_destroy_tir(priv, tir);
 }
 
 static void mlx5e_build_trap_params(struct mlx5_core_dev *mdev,
@@ -157,7 +150,7 @@ static struct mlx5e_trap *mlx5e_open_trap(struct mlx5e_priv *priv)
 	if (unlikely(err))
 		goto err_napi_del;
 
-	err = mlx5e_create_trap_direct_rq_tir(t->mdev, &t->tir, t->rq.rqn);
+	err = mlx5e_create_trap_direct_rq_tir(priv, &t->tir, t->rq.rqn);
 	if (err)
 		goto err_close_trap_rq;
 
@@ -173,7 +166,7 @@ err_napi_del:
 
 void mlx5e_close_trap(struct mlx5e_trap *trap)
 {
-	mlx5e_destroy_trap_direct_rq_tir(trap->mdev, &trap->tir);
+	mlx5e_destroy_trap_direct_rq_tir(trap->priv, &trap->tir);
 	mlx5e_close_trap_rq(&trap->rq);
 	netif_napi_del(&trap->napi);
 	kvfree(trap);

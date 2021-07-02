@@ -36,26 +36,46 @@
  * Global resources are common to all the netdevices crated on the same nic.
  */
 
-int mlx5e_create_tir(struct mlx5_core_dev *mdev, struct mlx5e_tir *tir, u32 *in)
+int mlx5e_create_tir(struct mlx5e_priv *priv, struct mlx5e_tir *tir,
+		     struct mlx5e_create_tir_param param,
+		     void (*build_tir_ctx)(struct mlx5e_priv *priv, u32 *tirc,
+					   struct mlx5e_create_tir_param param))
 {
-	struct mlx5e_hw_objs *res = &mdev->mlx5e_res.hw_objs;
+	struct mlx5_core_dev *mdev = priv->mdev;
+	struct mlx5e_hw_objs *res;
+	void *tirc;
+	int inlen;
+	u32 *in;
 	int err;
 
+	inlen = MLX5_ST_SZ_BYTES(create_tir_in);
+	in = kvzalloc(inlen, GFP_KERNEL);
+	if (!in)
+		return -ENOMEM;
+
+	tirc = MLX5_ADDR_OF(create_tir_in, in, ctx);
+	build_tir_ctx(priv, tirc, param);
+
+	res = &mdev->mlx5e_res.hw_objs;
 	err = mlx5_core_create_tir(mdev, in, &tir->tirn);
 	if (err)
-		return err;
+		goto out;
 
 	mutex_lock(&res->td.list_lock);
 	list_add(&tir->list, &res->td.tirs_list);
 	mutex_unlock(&res->td.list_lock);
-
-	return 0;
+out:
+	kvfree(in);
+	return err;
 }
 
-void mlx5e_destroy_tir(struct mlx5_core_dev *mdev,
+void mlx5e_destroy_tir(struct mlx5e_priv *priv,
 		       struct mlx5e_tir *tir)
 {
-	struct mlx5e_hw_objs *res = &mdev->mlx5e_res.hw_objs;
+	struct mlx5_core_dev *mdev = priv->mdev;
+	struct mlx5e_hw_objs *res;
+
+	res = &mdev->mlx5e_res.hw_objs;
 
 	mutex_lock(&res->td.list_lock);
 	mlx5_core_destroy_tir(mdev, tir->tirn);
