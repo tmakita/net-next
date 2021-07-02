@@ -1065,9 +1065,19 @@ static inline bool mlx5_tx_swp_supported(struct mlx5_core_dev *mdev)
 
 extern const struct ethtool_ops mlx5e_ethtool_ops;
 
-int mlx5e_create_tir(struct mlx5_core_dev *mdev, struct mlx5e_tir *tir,
-		     u32 *in);
-void mlx5e_destroy_tir(struct mlx5_core_dev *mdev,
+struct mlx5e_create_tir_param {
+	union {
+		u32 rqn;
+		u32 rqtn;
+		enum mlx5e_traffic_types tt;
+	};
+};
+
+int mlx5e_create_tir(struct mlx5e_priv *priv, struct mlx5e_tir *tir,
+		     struct mlx5e_create_tir_param param,
+		     void (*build_tir_ctx)(struct mlx5e_priv *priv, u32 *tirc,
+					   struct mlx5e_create_tir_param param));
+void mlx5e_destroy_tir(struct mlx5e_priv *priv,
 		       struct mlx5e_tir *tir);
 int mlx5e_create_mdev_resources(struct mlx5_core_dev *mdev);
 void mlx5e_destroy_mdev_resources(struct mlx5_core_dev *mdev);
