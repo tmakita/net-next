@@ -806,17 +806,9 @@ static int mlx5e_init_rep_rx(struct mlx5e_priv *priv)
 	if (err)
 		goto err_destroy_indirect_tirs;
 
-	err = mlx5e_create_direct_rqts(priv, priv->xsk_tir, max_nch);
-	if (unlikely(err))
-		goto err_destroy_direct_tirs;
-
-	err = mlx5e_create_direct_tirs(priv, priv->xsk_tir, max_nch);
-	if (unlikely(err))
-		goto err_destroy_xsk_rqts;
-
 	err = mlx5e_create_rep_ttc_table(priv);
 	if (err)
-		goto err_destroy_xsk_tirs;
+		goto err_destroy_direct_tirs;
 
 	err = mlx5e_create_rep_root_ft(priv);
 	if (err)
@@ -836,10 +828,6 @@ err_destroy_root_ft:
 	mlx5e_destroy_rep_root_ft(priv);
 err_destroy_ttc_table:
 	mlx5e_destroy_ttc_table(priv, &priv->fs.ttc);
-err_destroy_xsk_tirs:
-	mlx5e_destroy_direct_tirs(priv, priv->xsk_tir, max_nch);
-err_destroy_xsk_rqts:
-	mlx5e_destroy_direct_rqts(priv, priv->xsk_tir, max_nch);
 err_destroy_direct_tirs:
 	mlx5e_destroy_direct_tirs(priv, priv->direct_tir, max_nch);
 err_destroy_indirect_tirs:
@@ -861,8 +849,6 @@ static void mlx5e_cleanup_rep_rx(struct mlx5e_priv *priv)
 	rep_vport_rx_rule_destroy(priv);
 	mlx5e_destroy_rep_root_ft(priv);
 	mlx5e_destroy_ttc_table(priv, &priv->fs.ttc);
-	mlx5e_destroy_direct_tirs(priv, priv->xsk_tir, max_nch);
-	mlx5e_destroy_direct_rqts(priv, priv->xsk_tir, max_nch);
 	mlx5e_destroy_direct_tirs(priv, priv->direct_tir, max_nch);
 	mlx5e_destroy_indirect_tirs(priv);
 	mlx5e_destroy_direct_rqts(priv, priv->direct_tir, max_nch);

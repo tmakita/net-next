@@ -34,12 +34,14 @@
 #include "en.h"
 #include "en/params.h"
 #include "en/xsk/pool.h"
+#include "en/xsk/setup.h"
 
 struct mlx5e_ethtool_rule {
 	struct list_head             list;
 	struct ethtool_rx_flow_spec  flow_spec;
 	struct mlx5_flow_handle	     *rule;
 	struct mlx5e_ethtool_table   *eth_ft;
+	struct mlx5e_xsk_tir         *xsk_tir;
 };
 
 static void put_flow_table(struct mlx5e_ethtool_table *eth_ft)
@@ -397,7 +399,8 @@ static bool outer_header_zero(u32 *match_criteria)
 static struct mlx5_flow_handle *
 add_ethtool_flow_rule(struct mlx5e_priv *priv,
 		      struct mlx5_flow_table *ft,
-		      struct ethtool_rx_flow_spec *fs)
+		      struct ethtool_rx_flow_spec *fs,
+		      struct mlx5e_xsk_tir **xsk_tirp)
 {
 	struct mlx5_flow_act flow_act = { .flags = FLOW_ACT_NO_APPEND };
 	struct mlx5_flow_destination *dst = NULL;
@@ -422,16 +425,28 @@ add_ethtool_flow_rule(struct mlx5e_priv *priv,
 		u16 ix;
 
 		mlx5e_qid_get_ch_and_group(params, fs->ring_cookie, &ix, &group);
-		tir = group == MLX5E_RQ_GROUP_XSK ? priv->xsk_tir : priv->direct_tir;
+		if (group == MLX5E_RQ_GROUP_XSK) {
+			struct mlx5e_xsk_tir *xsk_tir;
+
+			xsk_tir = mlx5e_get_xsk_tir(priv, ix);
+			if (IS_ERR(xsk_tir)) {
+				err = PTR_ERR(xsk_tir);
+				goto free;
+			}
+			tir = &xsk_tir->tir;
+			*xsk_tirp = xsk_tir;
+		} else {
+			tir = &priv->direct_tir[ix];
+		}
 
 		dst = kzalloc(sizeof(*dst), GFP_KERNEL);
 		if (!dst) {
 			err = -ENOMEM;
-			goto free;
+			goto err_put_tir;
 		}
 
 		dst->type = MLX5_FLOW_DESTINATION_TYPE_TIR;
-		dst->tir_num = tir[ix].tirn;
+		dst->tir_num = tir->tirn;
 		flow_act.action = MLX5_FLOW_CONTEXT_ACTION_FWD_DEST;
 	}
 
@@ -442,12 +457,16 @@ add_ethtool_flow_rule(struct mlx5e_priv *priv,
 		err = PTR_ERR(rule);
 		netdev_err(priv->netdev, "%s: failed to add ethtool steering rule: %d\n",
 			   __func__, err);
-		goto free;
+		goto err_put_tir;
 	}
 free:
 	kvfree(spec);
 	kfree(dst);
 	return err ? ERR_PTR(err) : rule;
+err_put_tir:
+	if (*xsk_tirp)
+		mlx5e_put_xsk_tir(priv, *xsk_tirp);
+	goto free;
 }
 
 static void del_ethtool_rule(struct mlx5e_priv *priv,
@@ -458,6 +477,7 @@ static void del_ethtool_rule(struct mlx5e_priv *priv,
 	list_del(&eth_rule->list);
 	priv->fs.ethtool.tot_num_rules--;
 	put_flow_table(eth_rule->eth_ft);
+	mlx5e_put_xsk_tir(priv, eth_rule->xsk_tir);
 	kfree(eth_rule);
 }
 
@@ -695,7 +715,7 @@ mlx5e_ethtool_flow_replace(struct mlx5e_priv *priv,
 		err = -EINVAL;
 		goto del_ethtool_rule;
 	}
-	rule = add_ethtool_flow_rule(priv, eth_ft->ft, fs);
+	rule = add_ethtool_flow_rule(priv, eth_ft->ft, fs, &eth_rule->xsk_tir);
 	if (IS_ERR(rule)) {
 		err = PTR_ERR(rule);
 		goto del_ethtool_rule;

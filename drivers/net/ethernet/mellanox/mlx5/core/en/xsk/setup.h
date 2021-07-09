@@ -21,5 +21,7 @@ int mlx5e_xsk_redirect_rqt_to_channel(struct mlx5e_priv *priv, struct mlx5e_chan
 int mlx5e_xsk_redirect_rqt_to_drop(struct mlx5e_priv *priv, u16 ix);
 int mlx5e_xsk_redirect_rqts_to_channels(struct mlx5e_priv *priv, struct mlx5e_channels *chs);
 void mlx5e_xsk_redirect_rqts_to_drop(struct mlx5e_priv *priv, struct mlx5e_channels *chs);
+struct mlx5e_xsk_tir *mlx5e_get_xsk_tir(struct mlx5e_priv *priv, int ix);
+void mlx5e_put_xsk_tir(struct mlx5e_priv *priv, struct mlx5e_xsk_tir *xsk_tir);
 
 #endif /* __MLX5_EN_XSK_SETUP_H__ */
