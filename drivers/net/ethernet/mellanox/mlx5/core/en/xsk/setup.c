@@ -193,7 +193,10 @@ static int mlx5e_redirect_xsk_rqt(struct mlx5e_priv *priv, u16 ix, u32 rqn)
 		},
 	};
 
-	u32 rqtn = priv->xsk_tir[ix].rqt.rqtn;
+	u32 rqtn = priv->xsk_tir[ix].tir.rqt.rqtn;
+
+	if (!priv->xsk_tir[ix].tir.rqt.enabled)
+		return 0;
 
 	return mlx5e_redirect_rqt(priv, rqtn, 1, direct_rrp);
 }
@@ -252,4 +255,56 @@ void mlx5e_xsk_redirect_rqts_to_drop(struct mlx5e_priv *priv, struct mlx5e_chann
 
 		mlx5e_xsk_redirect_rqt_to_drop(priv, i);
 	}
+}
+
+struct mlx5e_xsk_tir *mlx5e_get_xsk_tir(struct mlx5e_priv *priv, int ix)
+{
+	struct mlx5e_xsk_tir *xsk_tir = &priv->xsk_tir[ix];
+	struct mlx5e_create_tir_param param;
+	struct mlx5e_channels *chs;
+	int err;
+
+	if (refcount_inc_not_zero(&xsk_tir->refcnt))
+		return xsk_tir;
+
+	refcount_set(&xsk_tir->refcnt, 1);
+
+	err = mlx5e_create_rqt(priv, 1, &xsk_tir->tir.rqt);
+	if (unlikely(err))
+		return ERR_PTR(err);
+
+	param.rqtn = xsk_tir->tir.rqt.rqtn;
+	err = mlx5e_create_tir(priv, &xsk_tir->tir, param,
+			       mlx5e_build_direct_tir_ctx);
+	if (unlikely(err))
+		goto err_destroy_rqt;
+
+	mutex_lock(&priv->state_lock);
+
+	chs = &priv->channels;
+	if (test_bit(MLX5E_STATE_OPENED, &priv->state) &&
+	    test_bit(MLX5E_CHANNEL_STATE_XSK, chs->c[ix]->state))
+		err = mlx5e_xsk_redirect_rqt_to_channel(priv, chs->c[ix]);
+
+	mutex_unlock(&priv->state_lock);
+
+	if (unlikely(err))
+		goto err_destroy_tir;
+
+	return xsk_tir;
+
+err_destroy_tir:
+	mlx5e_destroy_tir(priv, &xsk_tir->tir);
+err_destroy_rqt:
+	mlx5e_destroy_rqt(priv, &xsk_tir->tir.rqt);
+	return ERR_PTR(err);
+}
+
+void mlx5e_put_xsk_tir(struct mlx5e_priv *priv, struct mlx5e_xsk_tir *xsk_tir)
+{
+	if (!refcount_dec_and_test(&xsk_tir->refcnt))
+		return;
+
+	mlx5e_destroy_tir(priv, &xsk_tir->tir);
+	mlx5e_destroy_rqt(priv, &xsk_tir->tir.rqt);
 }

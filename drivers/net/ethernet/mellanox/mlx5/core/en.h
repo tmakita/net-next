@@ -756,6 +756,11 @@ struct mlx5e_tir {
 	struct list_head  list;
 };
 
+struct mlx5e_xsk_tir {
+	refcount_t	 refcnt;
+	struct mlx5e_tir tir;
+};
+
 enum {
 	MLX5E_TC_PRIO = 0,
 	MLX5E_NIC_PRIO
@@ -841,7 +846,7 @@ struct mlx5e_priv {
 	struct mlx5e_tir           indir_tir[MLX5E_NUM_INDIR_TIRS];
 	struct mlx5e_tir           inner_indir_tir[MLX5E_NUM_INDIR_TIRS];
 	struct mlx5e_tir           direct_tir[MLX5E_MAX_NUM_CHANNELS];
-	struct mlx5e_tir           xsk_tir[MLX5E_MAX_NUM_CHANNELS];
+	struct mlx5e_xsk_tir       xsk_tir[MLX5E_MAX_NUM_CHANNELS];
 	struct mlx5e_tir           ptp_tir;
 	struct mlx5e_rss_params    rss_params;
 	u32                        tx_rates[MLX5E_MAX_NUM_SQS];
@@ -966,6 +971,9 @@ void mlx5e_build_indir_tir_ctx_hash(struct mlx5e_rss_params *rss_params,
 				    void *tirc, bool inner);
 void mlx5e_modify_tirs_hash(struct mlx5e_priv *priv, void *in);
 struct mlx5e_tirc_config mlx5e_tirc_get_default_config(enum mlx5e_traffic_types tt);
+struct mlx5e_create_tir_param;
+void mlx5e_build_direct_tir_ctx(struct mlx5e_priv *priv, u32 *tirc,
+				struct mlx5e_create_tir_param param);
 
 struct mlx5e_xsk_param;
 
@@ -1103,6 +1111,7 @@ int mlx5e_create_direct_rqts(struct mlx5e_priv *priv, struct mlx5e_tir *tirs, in
 void mlx5e_destroy_direct_rqts(struct mlx5e_priv *priv, struct mlx5e_tir *tirs, int n);
 int mlx5e_create_direct_tirs(struct mlx5e_priv *priv, struct mlx5e_tir *tirs, int n);
 void mlx5e_destroy_direct_tirs(struct mlx5e_priv *priv, struct mlx5e_tir *tirs, int n);
+int mlx5e_create_rqt(struct mlx5e_priv *priv, int sz, struct mlx5e_rqt *rqt);
 void mlx5e_destroy_rqt(struct mlx5e_priv *priv, struct mlx5e_rqt *rqt);
 
 int mlx5e_create_tis(struct mlx5_core_dev *mdev, void *in, u32 *tisn);
